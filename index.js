@@ -27,16 +27,16 @@ app.get("/github", async (req, res) => {
   const cached = cache.get(cacheKey);
 
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) { // if cached is not 'undefined' and timestamp is less than 30 minutes old
-    return res.status(200).set("X-Cache", "HIT").json(cached.result); // Set status 200, and X-Cache to "HIT", RETURN result to terminate.
+    return res.status(200).set("X-Cache", "HIT").json(cached.data); // Set status 200, and X-Cache to "HIT", RETURN data to terminate.
   }
 
   try {
     const response = await axios.get(`https://api.github.com/users/${username}`, {
       headers: { Authorization: `Bearer ${TOKEN}` },  // TOKEN generated from github > settings > dev settings > access tokens > classic
     });
-    const result = response.data
-    cache.set(cacheKey, { result, timestamp: Date.now() }); // If we've made it here, result is stale or has not been cached, so cache it. timestamp used to keep fresh.
-    res.set("X-Cache", "MISS").json(result); // set X-Cache to "MISS" since it missed the cache check.
+    const { data } = response
+    cache.set(cacheKey, { data, timestamp: Date.now() }); // If we've made it here, data is stale or has not been cached, so cache it. timestamp used to keep fresh.
+    res.set("X-Cache", "MISS").json(data); // set X-Cache to "MISS" since it missed the cache check.
   } catch (error) {
     if (error.response) {
       res.status(error.response.status).json({ detail: "GitHub API error" });
