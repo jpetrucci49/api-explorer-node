@@ -2,14 +2,19 @@ const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
 const morgan = require("morgan");
+const redis = require('redis');
 require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const TOKEN = process.env.GITHUB_TOKEN;
-const cache = new Map(); // Data Map to store past queries
+const REDIS_HOST = process.env.REDIS_HOST;
+const REDIS_PORT = process.env.REDIS_PORT;
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD;
+
+const redisClient = redis.createClient({ url: `redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}` });
+redisClient.connect();
 app.set("etag", false); // Disable etag to avoid 304 "Not Modified" status codes when returning cached responses
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutes TTL (time to live) in ms
 
 // Middleware
 app.use(cors()); // Allow cross-origin requests from frontend
@@ -24,10 +29,10 @@ app.get("/github", async (req, res) => {
   }
 
   const cacheKey = `github:${username}`;
-  const cached = cache.get(cacheKey);
+  const cached = await redisClient.get(cacheKey);
 
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) { // if cached is not 'undefined' and timestamp is less than 30 minutes old
-    return res.status(200).set("X-Cache", "HIT").json(cached.data); // Set status 200, and X-Cache to "HIT", RETURN data to terminate.
+  if (cached) {
+    return res.status(200).set("X-Cache", "HIT").json(JSON.parse(cached)); // Set status 200, and X-Cache to "HIT", RETURN data to terminate.
   }
 
   try {
@@ -35,7 +40,7 @@ app.get("/github", async (req, res) => {
       headers: { Authorization: `Bearer ${TOKEN}` },  // TOKEN generated from github > settings > dev settings > access tokens > classic
     });
     const { data } = response
-    cache.set(cacheKey, { data, timestamp: Date.now() }); // If we've made it here, data is stale or has not been cached, so cache it. timestamp used to keep fresh.
+    await redisClient.setEx(cacheKey, 1800, JSON.stringify(data));
     res.set("X-Cache", "MISS").json(data); // set X-Cache to "MISS" since it missed the cache check.
   } catch (error) {
     if (error.response) {
