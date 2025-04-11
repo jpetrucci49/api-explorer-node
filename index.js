@@ -110,6 +110,15 @@ app.get("/analyze", async (req, res) => {
   }
 });
 
+app.post("/clear-cache", async (req, res) => {
+  try {
+    await redisClient.flushDb();
+    res.json({ detail: "Cache cleared successfully" });
+  } catch (error) {
+    res.status(500).json({ detail: "Failed to clear cache", error });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
