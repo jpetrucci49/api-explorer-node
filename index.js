@@ -13,8 +13,21 @@ const REDIS_PORT = process.env.REDIS_PORT;
 const REDIS_PASSWORD = process.env.REDIS_PASSWORD;
 const GITHUB_API_URL = "https://api.github.com";
 
-const redisClient = redis.createClient({ url: `redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}` });
-redisClient.connect();
+const redisClient = redis.createClient({
+  url: `redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}`,
+  socket: {
+    reconnectStrategy: false, // Disable reconnection
+  },
+});
+
+redisClient.connect().catch((err) => {
+  console.error('Initial Redis connection failed:', err);
+});
+
+redisClient.on('error', (err) => {
+  console.error('Redis error:', err.message);
+});
+
 app.set("etag", false); // Disable etag to avoid 304 "Not Modified" status codes when returning cached responses
 
 // Middleware
@@ -22,10 +35,14 @@ app.use(cors({ exposedHeaders: ['X-Cache'] })); // Allow cross-origin requests f
 app.use(morgan("dev")); // Log requests to console
 
 const fetchGitHub = async (url) => {
-  const response = await axios.get(url, {
-    headers: { Authorization: `Bearer ${TOKEN}` },  // TOKEN generated from github > settings > dev settings > access tokens > classic
-  });
-  return response.data;
+  try {
+    const response = await axios.get(url, {
+      headers: { Authorization: `Bearer ${TOKEN}` },  // TOKEN generated from github > settings > dev settings > access tokens > classic
+    });
+    return response.data;
+  } catch (error) {
+    throw error;
+  }
 };
 
 const analyzeProfile = async (username) => {
@@ -60,25 +77,46 @@ app.get("/github", async (req, res) => {
   const { username } = req.query;
 
   if (!username) {
-    return res.status(400).json({ error: "Username is required" });
+    return res.status(400).json({
+      detail: { status: 400, detail: "Username is required", extra: {} },
+    });
   }
 
   const cacheKey = `github:${username}`;
-  const cached = await redisClient.get(cacheKey);
-
-  if (cached) {
-    return res.status(200).set("X-Cache", "HIT").json(JSON.parse(cached)); // Set status 200, and X-Cache to "HIT", RETURN data to terminate.
+  let cached;
+  try {
+    cached = await redisClient.get(cacheKey);
+    if (cached) {
+      return res.status(200).set("X-Cache", "HIT").json(JSON.parse(cached));
+    }
+  } catch (error) {
+    console.error('Redis get error:', error.message);
   }
 
   try {
     const response = await fetchGitHub(`${GITHUB_API_URL}/users/${username}`);
-    await redisClient.setEx(cacheKey, 1800, JSON.stringify(response));
-    res.set("X-Cache", "MISS").json(response); // set X-Cache to "MISS" since it missed the cache check.
+    try {
+      await redisClient.setEx(cacheKey, 1800, JSON.stringify(response));
+    } catch (error) {
+      console.error('Redis set error:', error.message);
+    }
+    res.set("X-Cache", "MISS").json(response);
   } catch (error) {
     if (error.response) {
-      res.status(error.response.status).json({ detail: "GitHub API error" });
+      const status = error.response.status;
+      let detail = "GitHub API error";
+      const extra = {};
+      if (status === 404) detail = "GitHub user not found";
+      else if (status === 429) {
+        detail = "GitHub rate limit exceeded";
+        extra.remaining = error.response.headers["x-ratelimit-remaining"] || "0";
+      }
+      else if (status === 400) detail = "Invalid GitHub API request";
+      return res.status(status).json({ detail: { status, detail, extra } });
     } else {
-      res.status(500).json({ detail: "Failed to reach GitHub" });
+      return res.status(500).json({
+        detail: { status: 500, detail: "Network error contacting GitHub", extra: {} },
+      });
     }
   }
 });
@@ -87,25 +125,46 @@ app.get("/analyze", async (req, res) => {
   const { username } = req.query;
 
   if (!username) {
-    return res.status(400).json({ detail: "Username is required" });
+    return res.status(400).json({
+      detail: { status: 400, detail: "Username is required", extra: {} },
+    });
   }
 
   const cacheKey = `analyze:${username}`;
-  const cached = await redisClient.get(cacheKey);
-
-  if (cached) {
-    return res.status(200).set("X-Cache", "HIT").json(JSON.parse(cached));
+  let cached;
+  try {
+    cached = await redisClient.get(cacheKey);
+    if (cached) {
+      return res.status(200).set("X-Cache", "HIT").json(JSON.parse(cached));
+    }
+  } catch (error) {
+    console.error('Redis get error:', error.message);
   }
 
   try {
     const analysis = await analyzeProfile(username);
-    await redisClient.setEx(cacheKey, 1800, JSON.stringify(analysis));
+    try {
+      await redisClient.setEx(cacheKey, 1800, JSON.stringify(analysis));
+    } catch (error) {
+      console.error('Redis set error:', error.message);
+    }
     res.set("X-Cache", "MISS").json(analysis);
   } catch (error) {
     if (error.response) {
-      res.status(error.response.status).json({ detail: "GitHub API error" });
+      const status = error.response.status;
+      let detail = "GitHub API error";
+      const extra = {};
+      if (status === 404) detail = "GitHub user not found";
+      else if (status === 429) {
+        detail = "GitHub rate limit exceeded";
+        extra.remaining = error.response.headers["x-ratelimit-remaining"] || "0";
+      }
+      else if (status === 400) detail = "Invalid GitHub API request";
+      return res.status(status).json({ detail: { status, detail, extra } });
     } else {
-      res.status(500).json({ detail: "Failed to analyze profile" });
+      return res.status(500).json({
+        detail: { status: 500, detail: "Network error analyzing profile", extra: {} },
+      });
     }
   }
 });
@@ -115,7 +174,10 @@ app.post("/clear-cache", async (req, res) => {
     await redisClient.flushDb();
     res.json({ detail: "Cache cleared successfully" });
   } catch (error) {
-    res.status(500).json({ detail: "Failed to clear cache", error });
+    console.error('Redis flush error:', error.message);
+    return res.status(500).json({
+      detail: { status: 500, detail: "Redis connection failed", extra: {} },
+    });
   }
 });
 
