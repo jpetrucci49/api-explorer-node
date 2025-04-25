@@ -76,6 +76,12 @@ const analyzeProfile = async (username) => {
 app.get("/github", async (req, res) => {
   const { username } = req.query;
 
+  if (username === 'test429'){
+    return res.status(429).json({
+      detail: { status: 429, detail: 'GitHub rate limit exceeded', extra: { remaining: '0' } },
+     });
+  }
+
   if (!username) {
     return res.status(400).json({
       detail: { status: 400, detail: "Username is required", extra: {} },
@@ -123,6 +129,12 @@ app.get("/github", async (req, res) => {
 
 app.get("/analyze", async (req, res) => {
   const { username } = req.query;
+
+  if (username === 'test429'){
+    return res.status(429).json({
+      detail: { status: 429, detail: 'GitHub rate limit exceeded', extra: { remaining: '0' } },
+     });
+  }
 
   if (!username) {
     return res.status(400).json({
