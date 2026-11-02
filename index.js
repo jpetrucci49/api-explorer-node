@@ -8,13 +8,16 @@ require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 const TOKEN = process.env.GITHUB_TOKEN;
-const REDIS_HOST = process.env.REDIS_HOST;
-const REDIS_PORT = process.env.REDIS_PORT;
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD;
+const REDIS_HOST = process.env.REDIS_HOST || "localhost";
+const REDIS_PORT = process.env.REDIS_PORT || "6379";
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || "";
 const GITHUB_API_URL = "https://api.github.com";
+const redisUrl = REDIS_PASSWORD
+  ? `redis://:${encodeURIComponent(REDIS_PASSWORD)}@${REDIS_HOST}:${REDIS_PORT}`
+  : `redis://${REDIS_HOST}:${REDIS_PORT}`;
 
 const redisClient = redis.createClient({
-  url: `redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}`,
+  url: redisUrl,
   socket: {
     reconnectStrategy: false, // Disable reconnection
   },
@@ -30,9 +33,21 @@ redisClient.on('error', (err) => {
 
 app.set("etag", false); // Disable etag to avoid 304 "Not Modified" status codes when returning cached responses
 
+const frontendOrigins = (process.env.FRONTEND_ORIGIN || "")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+
 // Middleware
-app.use(cors({ exposedHeaders: ['X-Cache'] })); // Allow cross-origin requests from frontend
+app.use(cors({
+  origin: frontendOrigins.length > 0 ? frontendOrigins : true,
+  exposedHeaders: ["X-Cache"],
+}));
 app.use(morgan("dev")); // Log requests to console
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok" });
+});
 
 const fetchGitHub = async (url) => {
   try {
@@ -193,6 +208,6 @@ app.post("/clear-cache", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on http://0.0.0.0:${PORT}`);
 });

@@ -42,6 +42,16 @@ A RESTful API built with Node.js and Express to fetch and cache GitHub user data
 }
 ```
 
+## Production
+
+The process reads `PORT` (default 3001), `GITHUB_TOKEN`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, and `FRONTEND_ORIGIN` (default `http://localhost:3000`). Redis must be plain TCP, with TLS off. Copy `.env.example` to `.env` and do not commit `.env`.
+
+```bash
+node index.js
+```
+
+`GET /health` returns 200 for the host health check. Deploy steps live in the [umbrella README](https://github.com/jpetrucci49/fullstack-api-explorer).
+
 ## Next Steps
 - Add `/analyze` endpoint for profile insights (e.g., language stats).
 - Add `/network` endpoint for collaboration mapping.
